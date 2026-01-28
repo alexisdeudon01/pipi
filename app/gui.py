@@ -16,21 +16,26 @@ ui_q = queue.Queue()
 def sh_quote(s: str) -> str:
     return "'" + s.replace("'", "'\"'\"'") + "'"
 
+import subprocess
+
 def ssh_run(host, user, pwd, cmd: str, sudo=False, timeout=8):
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, username=user, password=pwd, timeout=timeout)
+    full_cmd = []
     if sudo:
-        full = f"sudo -S bash -lc {sh_quote(cmd)}"
-        stdin, stdout, stderr = client.exec_command(full, get_pty=True)
-        stdin.write(pwd + "\n"); stdin.flush()
+        full_cmd = ["sshpass", "-p", pwd, "ssh", "-o", "StrictHostKeyChecking=no", f"{user}@{host}", "sudo", "-S", "bash", "-lc", sh_quote(cmd)]
     else:
-        stdin, stdout, stderr = client.exec_command(f"bash -lc {sh_quote(cmd)}", get_pty=True)
-    out = stdout.read().decode(errors="replace")
-    err = stderr.read().decode(errors="replace")
-    rc = stdout.channel.recv_exit_status()
-    client.close()
-    return out.strip(), err.strip(), rc
+        full_cmd = ["sshpass", "-p", pwd, "ssh", "-o", "StrictHostKeyChecking=no", f"{user}@{host}", "bash", "-lc", sh_quote(cmd)]
+
+    try:
+        result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=timeout, check=True)
+        return result.stdout.strip(), result.stderr.strip(), result.returncode
+    except subprocess.CalledProcessError as e:
+        return e.stdout.strip(), e.stderr.strip(), e.returncode
+    except subprocess.TimeoutExpired:
+        return "", "Commande SSH expirée.", 1
+    except FileNotFoundError:
+        return "", "Erreur: 'sshpass' ou 'ssh' non trouvé. Assurez-vous qu'ils sont installés et dans votre PATH.", 1
+    except Exception as e:
+        return "", f"Erreur inattendue lors de l'exécution SSH: {e}", 1
 
 def post(kind, payload):
     ui_q.put((kind, payload))
@@ -129,6 +134,26 @@ class App:
         ttk.Button(btns, text="🧾 Export logs", command=lambda: self._thread(self.export_logs)).pack(side="left", padx=4)
         ttk.Button(btns, text="📦 Backup", command=lambda: self._thread(self.backup_all)).pack(side="left", padx=4)
         ttk.Button(btns, text="🔄 Normal", command=lambda: self._thread(self.restore_normal)).pack(side="left", padx=4)
+
+        ttk.Separator(frm).pack(fill="x", pady=6)
+
+        # Section Pont Transparent
+        bridge_frm = ttk.LabelFrame(frm, text="Pont Transparent (Layer 2)", padding=10)
+        bridge_frm.pack(fill="x", pady=4)
+        ttk.Button(bridge_frm, text="🌉 Activer Pont", command=lambda: self._thread(self.setup_bridge)).pack(side="left", padx=4)
+        ttk.Button(bridge_frm, text="🗑️ Désactiver Pont", command=lambda: self._thread(self.restore_bridge)).pack(side="left", padx=4)
+        self.bridge_status = tk.StringVar(value="Inactif")
+        ttk.Label(bridge_frm, textvariable=self.bridge_status).pack(side="left", padx=6)
+
+        ttk.Separator(frm).pack(fill="x", pady=6)
+
+        # Section Interception DNS
+        dns_frm = ttk.LabelFrame(frm, text="Interception DNS (Sinkhole)", padding=10)
+        dns_frm.pack(fill="x", pady=4)
+        ttk.Button(dns_frm, text="🕵️ Activer DNS Intercept", command=lambda: self._thread(self.setup_dns_interceptor)).pack(side="left", padx=4)
+        ttk.Button(dns_frm, text="❌ Désactiver DNS Intercept", command=lambda: self._thread(self.restore_dns_interceptor)).pack(side="left", padx=4)
+        self.dns_status = tk.StringVar(value="Inactif")
+        ttk.Label(dns_frm, textvariable=self.dns_status).pack(side="left", padx=6)
 
         ttk.Separator(frm).pack(fill="x", pady=6)
 
@@ -337,6 +362,82 @@ dhclient eth0 || true
         except Exception as e:
             self._log(f"❌ restore_normal: {e}")
             self._set_status("Erreur")
+        finally:
+            self.progress.stop()
+
+    def setup_bridge(self):
+        self.progress.start()
+        self._log("🌉 Activation du pont transparent...")
+        try:
+            host, user, pwd = self.host.get().strip(), self.user.get().strip(), self.pwd.get().strip()
+            out, err, rc = ssh_run(host, user, pwd, "/home/pi/setup_gateway.sh bridge", sudo=True)
+            if rc == 0:
+                self._log(f"✅ Pont transparent activé:\n{out}")
+                self.bridge_status.set("Actif")
+            else:
+                self._log(f"❌ Échec de l'activation du pont transparent:\n{err}")
+                self.bridge_status.set("Erreur")
+        except Exception as e:
+            self._log(f"❌ setup_bridge: {e}")
+            self.bridge_status.set("Erreur")
+        finally:
+            self.progress.stop()
+
+    def restore_bridge(self):
+        if not messagebox.askyesno("Confirmer","Désactiver le pont transparent ?"):
+            return
+        self.progress.start()
+        self._log("🗑️ Désactivation du pont transparent...")
+        try:
+            host, user, pwd = self.host.get().strip(), self.user.get().strip(), self.pwd.get().strip()
+            out, err, rc = ssh_run(host, user, pwd, "/home/pi/setup_gateway.sh restore-bridge", sudo=True)
+            if rc == 0:
+                self._log(f"✅ Pont transparent désactivé:\n{out}")
+                self.bridge_status.set("Inactif")
+            else:
+                self._log(f"❌ Échec de la désactivation du pont transparent:\n{err}")
+                self.bridge_status.set("Erreur")
+        except Exception as e:
+            self._log(f"❌ restore_bridge: {e}")
+            self.bridge_status.set("Erreur")
+        finally:
+            self.progress.stop()
+
+    def setup_dns_interceptor(self):
+        self.progress.start()
+        self._log("🕵️ Activation de l'interception DNS...")
+        try:
+            host, user, pwd = self.host.get().strip(), self.user.get().strip(), self.pwd.get().strip()
+            out, err, rc = ssh_run(host, user, pwd, "/home/pi/setup_gateway.sh dns", sudo=True)
+            if rc == 0:
+                self._log(f"✅ Interception DNS activée:\n{out}")
+                self.dns_status.set("Actif")
+            else:
+                self._log(f"❌ Échec de l'activation de l'interception DNS:\n{err}")
+                self.dns_status.set("Erreur")
+        except Exception as e:
+            self._log(f"❌ setup_dns_interceptor: {e}")
+            self.dns_status.set("Erreur")
+        finally:
+            self.progress.stop()
+
+    def restore_dns_interceptor(self):
+        if not messagebox.askyesno("Confirmer","Désactiver l'interception DNS ?"):
+            return
+        self.progress.start()
+        self._log("❌ Désactivation de l'interception DNS...")
+        try:
+            host, user, pwd = self.host.get().strip(), self.user.get().strip(), self.pwd.get().strip()
+            out, err, rc = ssh_run(host, user, pwd, "/home/pi/setup_gateway.sh restore-dns", sudo=True)
+            if rc == 0:
+                self._log(f"✅ Interception DNS désactivée:\n{out}")
+                self.dns_status.set("Inactif")
+            else:
+                self._log(f"❌ Échec de la désactivation de l'interception DNS:\n{err}")
+                self.dns_status.set("Erreur")
+        except Exception as e:
+            self._log(f"❌ restore_dns_interceptor: {e}")
+            self.dns_status.set("Erreur")
         finally:
             self.progress.stop()
 

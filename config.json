@@ -1,5 +1,5 @@
 {
-  "pi_host": "192.168.178.66",
+  "pi_host": "192.168.178.67",
   "pi_user": "pi",
   "pi_pass": "pi",
   "agent_port": 8787,
