@@ -2,8 +2,10 @@ version: '3.8'
 services:
   app:
     build: .
-    volumes:
-      - ./app:/app/app
     environment:
       - PYTHONUNBUFFERED=1
-    command: python app/main.py
+      - DISPLAY=${DISPLAY}
+    volumes:
+      - ./app:/app/app
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    command: python app/gui.py
