@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY ../../app/pi_agent /app/pi_agent
+COPY app/pi_agent /app/pi_agent
 
 EXPOSE 8787
 ENV AGENT_PORT=8787

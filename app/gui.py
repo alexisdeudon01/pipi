@@ -341,8 +341,21 @@ dhclient eth0 || true
             self.progress.stop()
 
     # ===== Live agent =====
+    def _get_agent_port(self) -> int:
+        fallback = int(self.cfg.get("agent_port", 8787))
+        try:
+            port = int(self.agent_port.get())
+        except Exception:
+            port = fallback
+        if port < 1 or port > 65535:
+            port = fallback
+            self.agent_port.set(port)
+            self._log(f"⚠️ Port agent invalide, retour à {port}")
+        return port
+
     def agent_url(self, path):
-        return f"http://{self.host.get().strip()}:{self.agent_port.get()}{path}"
+        port = self._get_agent_port()
+        return f"http://{self.host.get().strip()}:{port}{path}"
 
     def agent_health(self):
         self.progress.start()

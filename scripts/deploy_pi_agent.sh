@@ -34,8 +34,8 @@ sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=no "${PI_USER}@${PI_HOST}" ba
 set -e
 mkdir -p ~/pi-agent-src
 tar xzf ~/pi-agent-src.tgz -C ~/pi-agent-src
-cd ~/pi-agent-src/docker/pi
-docker build -t pi-agent:latest .
+cd ~/pi-agent-src
+docker build -f docker/pi/Dockerfile -t pi-agent:latest .
 docker rm -f pi-agent >/dev/null 2>&1 || true
 docker run -d --name pi-agent --restart unless-stopped --network host   -e AGENT_PORT=8787   -e AP_IFACE_HINT=wlan0   -e UP_IFACE_HINT=eth0   pi-agent:latest
 docker ps | grep pi-agent || true
