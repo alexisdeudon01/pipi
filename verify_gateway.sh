@@ -49,6 +49,12 @@ verify_ip_forwarding() {
 # Verify Routed AP (Evil Twin Style)
 verify_routed_ap() {
     log_info "Vérification du Routed AP (Evil Twin)..."
+    local NETWORKD_STATUS=$(ssh ${PI_USER}@${PI_IP} "sudo /usr/bin/systemctl is-active systemd-networkd" 2>/dev/null)
+    if [[ "$NETWORKD_STATUS" == "active" ]]; then
+        log_warning "systemd-networkd est actif (mode bridge). Vérification AP ignorée."
+        return
+    fi
+
     log_info "--- État de wlan0 ---"
     local WLAN0_STATUS=$(ssh ${PI_USER}@${PI_IP} "/usr/bin/nmcli device status | grep wlan0" 2>/dev/null)
     if [ -n "$WLAN0_STATUS" ]; then
@@ -148,7 +154,12 @@ verify_dns_interceptor() {
     fi
 
     log_info "--- Test de résolution DNS (doubleclick.net) ---"
-    local DIG_RESULT=$(ssh ${PI_USER}@${PI_IP} "/usr/bin/dig @127.0.0.1 doubleclick.net +short" 2>/dev/null)
+    local DNS_TARGET=$(echo "$DNS_REDIRECT_RULES" | /usr/bin/sed -n 's/.*to:\([0-9.]\+\):53.*/\1/p' | /usr/bin/head -n 1)
+    if [ -z "$DNS_TARGET" ]; then
+        DNS_TARGET="127.0.0.1"
+        log_warning "Cible DNAT non détectée, fallback sur ${DNS_TARGET}."
+    fi
+    local DIG_RESULT=$(ssh ${PI_USER}@${PI_IP} "/usr/bin/dig @${DNS_TARGET} doubleclick.net +short" 2>/dev/null)
     if echo "$DIG_RESULT" | grep -q -E '^0\.0\.0\.0$|blocked'; then
         log_success "doubleclick.net est bloqué ou redirigé (résultat: ${DIG_RESULT}). L'intercepteur DNS est actif."
     elif [ -n "$DIG_RESULT" ]; then
