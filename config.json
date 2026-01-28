@@ -1,0 +1,9 @@
+{
+  "pi_host": "192.168.178.66",
+  "pi_user": "pi",
+  "pi_pass": "pi",
+  "agent_port": 8787,
+  "ap_iface_hint": "wlan0",
+  "upstream_iface_hint": "eth0",
+  "poll_interval_sec": 2
+}
